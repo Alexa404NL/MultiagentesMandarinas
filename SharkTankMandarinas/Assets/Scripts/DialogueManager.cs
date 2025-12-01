@@ -133,7 +133,7 @@ public class DialogueManager : MonoBehaviour
         DialogueLine currentLine = dialogueQueue.Dequeue();
 
         characterName.text = currentLine.characterId;
-        dialogueText.text = currentLine.text;
+        dialogueText.text = currentLine.content;
 
         Sprite s = GetSpriteById(currentLine.characterId);
         if (s != null)
@@ -166,7 +166,7 @@ public class QnAData { public string question; public string answer; }
 public class CharacterSprite { public string characterId; public Sprite portrait; }
 
 [System.Serializable] // Line of dialogue and character speaking
-public class DialogueLine { public string characterId; public string text; }
+public class DialogueLine { public string characterId; public string content; }
 
 [System.Serializable] // Needed for JSON decoding apparnently
 public class ConversationWrapper { public List<DialogueLine> conversation; }
