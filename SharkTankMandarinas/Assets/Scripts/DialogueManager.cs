@@ -2,6 +2,7 @@ using UnityEngine;
 using TMPro;
 using UnityEngine.UI;
 using System.Collections.Generic;
+using System.Text;
 
 public class DialogueManager : MonoBehaviour
 {
@@ -16,9 +17,21 @@ public class DialogueManager : MonoBehaviour
     [SerializeField] private Image characterSprite;
     [SerializeField] private TMP_Text characterName;
     [SerializeField] private TMP_Text dialogueText;
+    [SerializeField] private TMP_Text pageIndicatorText;
     [SerializeField] private Button nextButton;
     [SerializeField] private TextAsset dialogueJson;
     [SerializeField] private List<CharacterSprite> characterSprites;
+
+    [Header("Pagination")]
+    [SerializeField] private bool enablePagination = true;
+    [SerializeField, Tooltip("A padding (in pixels) to spare from the available dialogue box height when paginating. Smaller values pack more text into each page.")]
+    private float pageVerticalPadding = 2f;
+    [SerializeField, Tooltip("When true paragraphs will be kept together when they fit; if false, paragraphs may be split across pages to maximize fill.")]
+    private bool preserveParagraphs = true;
+    [SerializeField, Tooltip("An optional RectTransform that defines the dialogue area to be used for pagination measurement. If not set, the manager will try to find a parent RectTransform called 'Dialogue Box'.")]
+    private RectTransform dialogueBoxRect = null;
+        [SerializeField, Tooltip("A small trailing string appended to pages when a paragraph is split across multiple pages (E.g. ' -'). Leave blank to disable.")]
+        private string splitIndicator = " -";
 
   
     private string[] questions = new string[] { 
@@ -48,6 +61,28 @@ public class DialogueManager : MonoBehaviour
     {
         submitButton.onClick.AddListener(OnSubmitAnswer);
         nextButton.onClick.AddListener(OnNextDialogueLine);
+        // Auto-assign dialogueBoxRect if missing by searching for a parent RectTransform named "Dialogue Box" (case-insensitive)
+        if (dialogueBoxRect == null && dialogueText != null)
+        {
+            Transform parent = dialogueText.transform.parent;
+            while (parent != null)
+            {
+                var rt = parent as RectTransform;
+                if (rt != null)
+                {
+                    if (string.Equals(rt.name, "Dialogue Box", System.StringComparison.OrdinalIgnoreCase) || string.Equals(rt.name, "dialogue box", System.StringComparison.OrdinalIgnoreCase))
+                    {
+                        dialogueBoxRect = rt;
+                        break;
+                    }
+                }
+                parent = parent.parent;
+            }
+
+            // If still null, fallback to immediate parent RectTransform
+            if (dialogueBoxRect == null && dialogueText.rectTransform.parent != null)
+                dialogueBoxRect = dialogueText.rectTransform.parent as RectTransform;
+        }
         
         // should actually start with a short conversation with the sharks
         // but we havent written it yet
@@ -116,7 +151,18 @@ public class DialogueManager : MonoBehaviour
         dialogueQueue.Clear();
         foreach (var line in wrapper.conversation)
         {
-            dialogueQueue.Enqueue(line);
+            if (enablePagination)
+            {
+                var pages = SplitDialogueLine(line);
+                foreach (var p in pages) dialogueQueue.Enqueue(p);
+            }
+            else
+            {
+                // Ensure non-paginated line still has page metadata
+                line.pageIndex = 1;
+                line.pageCount = 1;
+                dialogueQueue.Enqueue(line);
+            }
         }
 
         OnNextDialogueLine();
@@ -145,6 +191,14 @@ public class DialogueManager : MonoBehaviour
         {
             characterSprite.gameObject.SetActive(false);
         }
+        // Update page indicator
+        if (pageIndicatorText != null)
+        {
+            if (currentLine.pageCount > 1)
+                pageIndicatorText.text = $"{currentLine.pageIndex}/{currentLine.pageCount}";
+            else
+                pageIndicatorText.text = "";
+        }
     }
 
     private Sprite GetSpriteById(string id)
@@ -154,6 +208,189 @@ public class DialogueManager : MonoBehaviour
             if (profile.characterId == id) return profile.portrait;
         }
         return null;
+    }
+
+    // Splits a single DialogueLine into multiple DialogueLine pages based on the UI height available.
+    private List<DialogueLine> SplitDialogueLine(DialogueLine line)
+    {
+        var pages = new List<DialogueLine>();
+
+        if (dialogueText == null || line == null || string.IsNullOrEmpty(line.content))
+        {
+            if (line != null) pages.Add(line);
+            return pages;
+        }
+
+        // Ensure width/height are known. If height is zero, try to schedule pagination with fallback not to split.
+        float width = dialogueText.rectTransform.rect.width;
+        float maxHeight = dialogueText.rectTransform.rect.height - pageVerticalPadding + 5f;
+        if (dialogueBoxRect != null)
+        {
+            var boxRect = dialogueBoxRect.rect;
+            if (boxRect.width > 0f) width = boxRect.width;
+            if (boxRect.height > 0f) maxHeight = boxRect.height - pageVerticalPadding;
+        }
+
+        // If height is zero (layout not computed), avoid splitting to prevent mis-splitting.
+        if (maxHeight <= 0f)
+        {
+            pages.Add(line);
+            return pages;
+        }
+
+        System.Action<string, bool> addPage = (string text, bool continues) =>
+        {
+            if (continues && !string.IsNullOrEmpty(splitIndicator))
+                text = text + splitIndicator;
+
+            pages.Add(new DialogueLine { characterId = line.characterId, content = text });
+        };
+
+        // We will try to pack multiple paragraphs in a single page if they fit.
+        string[] paragraphs;
+        if (preserveParagraphs)
+            paragraphs = line.content.Split('\n');
+        else
+            paragraphs = new string[] { line.content.Replace('\n', ' ') };
+        StringBuilder pageBuffer = new StringBuilder();
+
+        foreach (var para in paragraphs)
+        {
+            string candidatePara = para; // paragraph text (no newline at the end for measurement)
+
+            // If the paragraph fits into the current pageBuffer, append it; otherwise finalize and try to fit it alone (or split)
+            string combinedCandidate = pageBuffer.Length == 0 ? candidatePara : pageBuffer.ToString() + "\n" + candidatePara;
+            var combinedPref = dialogueText.GetPreferredValues(combinedCandidate, width, 0f);
+
+            if (combinedPref.y <= maxHeight)
+            {
+                // It fits combined, so just keep it in the buffer
+                if (pageBuffer.Length > 0)
+                {
+                    pageBuffer.Append('\n');
+                }
+                pageBuffer.Append(candidatePara);
+                continue;
+            }
+
+            // Combined overflows. If the pageBuffer is not empty, finalize it first, then try to add the paragraph as a new page.
+            if (pageBuffer.Length > 0)
+            {
+                addPage(pageBuffer.ToString(), false);
+                pageBuffer.Clear();
+            }
+
+            // Now try to fit the entire paragraph alone
+            var paraPref = dialogueText.GetPreferredValues(candidatePara, width, 0f);
+            if (paraPref.y <= maxHeight)
+            {
+                // Paragraph fits alone in a fresh page; put it into pageBuffer (and we'll continue to try to pack following paragraphs)
+                pageBuffer.Append(candidatePara);
+                continue;
+            }
+
+            // Paragraph is too tall alone: split by words.
+            var words = candidatePara.Split(' ');
+            StringBuilder wordBuffer = new StringBuilder();
+            for (int i = 0; i < words.Length; i++)
+            {
+                string word = words[i];
+                string candidateWord = wordBuffer.Length == 0 ? word : wordBuffer.ToString() + " " + word;
+                bool willContinueAfterCandidate = i < words.Length - 1; // more words will follow
+                string measureCandidateWord = candidateWord;
+                if (willContinueAfterCandidate && !string.IsNullOrEmpty(splitIndicator)) measureCandidateWord = candidateWord + splitIndicator;
+                var pref = dialogueText.GetPreferredValues(measureCandidateWord, width, 0f);
+                if (pref.y <= maxHeight)
+                {
+                    // Fit in wordBuffer
+                    if (wordBuffer.Length > 0) wordBuffer.Append(' ');
+                    wordBuffer.Append(word);
+                }
+                else
+                {
+                    // Overflow: flush current wordBuffer as a page if it has content
+                    if (wordBuffer.Length > 0)
+                    {
+                        // Since there are more words to process, this page continues the paragraph
+                        addPage(wordBuffer.ToString(), true);
+                        wordBuffer.Clear();
+                    }
+
+                    // Try to fit the single word on a page
+                    bool willContinueAfterWord = i < words.Length - 1; // more words remain
+                    string measureSingle = willContinueAfterWord && !string.IsNullOrEmpty(splitIndicator) ? word + splitIndicator : word;
+                    var singlePref = dialogueText.GetPreferredValues(measureSingle, width, 0f);
+                    if (singlePref.y <= maxHeight)
+                    {
+                        // Word fits alone in a fresh page - start new wordBuffer
+                        wordBuffer.Append(word);
+                        continue;
+                    }
+                    else
+                    {
+                        // Word itself is too tall: split it by characters into chunks that fit
+                        int startIndex = 0;
+                        while (startIndex < word.Length)
+                        {
+                            int length = 1;
+                            // expand length as much as it fits
+                            while (startIndex + length <= word.Length)
+                            {
+                                string candidateChunk = word.Substring(startIndex, length);
+                                // If this is not the final chunk of the word or there are more words after it, prepare measurement including the indicator
+                                bool chunkWillContinue = (startIndex + length) < word.Length || i < words.Length - 1;
+                                string measureChunk = chunkWillContinue && !string.IsNullOrEmpty(splitIndicator) ? candidateChunk + splitIndicator : candidateChunk;
+                                var prefChunk = dialogueText.GetPreferredValues(measureChunk, width, 0f);
+                                if (prefChunk.y <= maxHeight) length++;
+                                else break;
+                            }
+                            length = Mathf.Max(1, length - 1);
+                            string chunk = word.Substring(startIndex, length);
+                            // Determine if the chunk continues within the paragraph
+                            bool chunkMore = (startIndex + length) < word.Length || i < words.Length - 1;
+                            addPage(chunk, chunkMore);
+                            startIndex += length;
+                        }
+                    }
+                }
+            }
+
+            // flush any remaining words from the wordBuffer
+            if (wordBuffer.Length > 0)
+            {
+                addPage(wordBuffer.ToString(), false);
+                wordBuffer.Clear();
+            }
+
+            // After dealing with an oversized paragraph, we will continue with the next paragraph.
+        }
+
+        // After processing all paragraphs, flush pageBuffer
+        if (pageBuffer.Length > 0)
+        {
+            addPage(pageBuffer.ToString(), false);
+            pageBuffer.Clear();
+        }
+
+        // Final leftover: (none) all buffers flushed earlier
+
+        // If we couldn't split anything, return original line
+        if (pages.Count == 0)
+        {
+            pages.Add(line);
+        }
+
+        // Fill in page index/meta for returned pages
+        if (pages.Count > 0)
+        {
+            for (int i = 0; i < pages.Count; i++)
+            {
+                pages[i].pageIndex = i + 1;
+                pages[i].pageCount = pages.Count;
+            }
+        }
+
+        return pages;
     }
 }
 
@@ -166,7 +403,16 @@ public class QnAData { public string question; public string answer; }
 public class CharacterSprite { public string characterId; public Sprite portrait; }
 
 [System.Serializable] // Line of dialogue and character speaking
-public class DialogueLine { public string characterId; public string content; }
+public partial class DialogueLine { public string characterId; public string content; }
+
+// Added to display page metadata when a DialogueLine is split into multiple pages
+public partial class DialogueLine
+{
+    // 1-based index of this page within the group
+    public int pageIndex = 1;
+    // Total pages in this dialogue group
+    public int pageCount = 1;
+}
 
 [System.Serializable] // Needed for JSON decoding apparnently
 public class ConversationWrapper { public List<DialogueLine> conversation; }
