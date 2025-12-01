@@ -325,6 +325,8 @@ public class DialogueManager : MonoBehaviour
             // Clean up previous currentModelInstance
             if (currentModelInstance != null)
             {
+                // Before hiding/destroying, make sure yapping is turned off.
+                SetAnimatorYapping(currentModelInstance, false);
                 if (currentModelIsScene)
                 {
                     // Don't destroy scene instances, just hide them
@@ -338,12 +340,14 @@ public class DialogueManager : MonoBehaviour
                 currentModelInstance = null;
             }
 
-            if (isSceneInstance)
+                if (isSceneInstance)
             {
                 // Just enable the existing scene model instance. Do NOT reparent or change transform - it's placed as desired in the scene.
                 modelRef.SetActive(true);
                 currentModelInstance = modelRef;
                 currentModelIsScene = true;
+                    // Set animator 'yapping' true when model becomes active for speaking
+                    SetAnimatorYapping(currentModelInstance, true);
             }
             else
             {
@@ -360,6 +364,7 @@ public class DialogueManager : MonoBehaviour
                 currentModelInstance.transform.localPosition = Vector3.zero;
                 currentModelInstance.transform.localRotation = Quaternion.identity;
                 currentModelInstance.SetActive(true);
+                SetAnimatorYapping(currentModelInstance, true);
                 currentModelIsScene = false;
             }
             currentCharacterId = currentLine.characterId;
@@ -407,6 +412,25 @@ public class DialogueManager : MonoBehaviour
         // found none
         characterModelCache[id] = null;
         return null;
+    }
+
+    private void SetAnimatorYapping(GameObject go, bool value)
+    {
+        if (go == null) return;
+        // Prefer animator on root, otherwise search children
+        Animator animator = go.GetComponent<Animator>();
+        if (animator == null) animator = go.GetComponentInChildren<Animator>();
+        if (animator == null) return;
+        // Only set the parameter if it exists (avoid runtime errors with different configs)
+        var parameters = animator.parameters;
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            if (parameters[i].name == "yapping" && parameters[i].type == AnimatorControllerParameterType.Bool)
+            {
+                animator.SetBool("yapping", value);
+                return;
+            }
+        }
     }
 
     // Splits a single DialogueLine into multiple DialogueLine pages based on the UI height available.
