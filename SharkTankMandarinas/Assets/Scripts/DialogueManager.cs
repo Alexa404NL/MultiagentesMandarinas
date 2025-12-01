@@ -14,13 +14,16 @@ public class DialogueManager : MonoBehaviour
 
     [Header("Phase 3: Dialogue")]
     [SerializeField] private GameObject dialoguePanel;
-    [SerializeField] private Image characterSprite;
+    [SerializeField] private GameObject characterModelParent;
     [SerializeField] private TMP_Text characterName;
     [SerializeField] private TMP_Text dialogueText;
     [SerializeField] private TMP_Text pageIndicatorText;
     [SerializeField] private Button nextButton;
     [SerializeField] private TextAsset dialogueJson;
-    [SerializeField] private List<CharacterSprite> characterSprites;
+    [SerializeField] private List<CharacterModel> characterModels;
+    // a small runtime lookup cache for fast prefab lookup
+    private Dictionary<string, GameObject> characterModelCache = new Dictionary<string, GameObject>();
+    private GameObject currentModelInstance = null;
 
     [Header("Pagination")]
     [SerializeField] private bool enablePagination = true;
@@ -181,15 +184,29 @@ public class DialogueManager : MonoBehaviour
         characterName.text = currentLine.characterId;
         dialogueText.text = currentLine.content;
 
-        Sprite s = GetSpriteById(currentLine.characterId);
-        if (s != null)
+        GameObject prefab = GetModelPrefabById(currentLine.characterId);
+        if (prefab != null && characterModelParent != null)
         {
-            characterSprite.sprite = s;
-            characterSprite.gameObject.SetActive(true);
+            // Destroy the old model instance if present
+            if (currentModelInstance != null)
+            {
+                Destroy(currentModelInstance);
+                currentModelInstance = null;
+            }
+            // Instantiate the new model as a child of the parent container
+            currentModelInstance = Instantiate(prefab, characterModelParent.transform);
+            currentModelInstance.transform.localPosition = Vector3.zero;
+            currentModelInstance.transform.localRotation = Quaternion.identity;
+            currentModelInstance.SetActive(true);
         }
         else
         {
-            characterSprite.gameObject.SetActive(false);
+            // No model found - destroy any existing instance
+            if (currentModelInstance != null)
+            {
+                Destroy(currentModelInstance);
+                currentModelInstance = null;
+            }
         }
         // Update page indicator
         if (pageIndicatorText != null)
@@ -201,12 +218,20 @@ public class DialogueManager : MonoBehaviour
         }
     }
 
-    private Sprite GetSpriteById(string id)
+    private GameObject GetModelPrefabById(string id)
     {
-        foreach (var profile in characterSprites)
+        if (string.IsNullOrEmpty(id)) return null;
+        if (characterModelCache.TryGetValue(id, out var cached)) return cached;
+        foreach (var profile in characterModels)
         {
-            if (profile.characterId == id) return profile.portrait;
+            if (profile.characterId == id)
+            {
+                characterModelCache[id] = profile.prefab;
+                return profile.prefab;
+            }
         }
+        // found none
+        characterModelCache[id] = null;
         return null;
     }
 
@@ -399,8 +424,8 @@ public class DialogueManager : MonoBehaviour
 [System.Serializable] // Qna answers for entrepeneur
 public class QnAData { public string question; public string answer; }
 
-[System.Serializable] // Character sprite and id
-public class CharacterSprite { public string characterId; public Sprite portrait; }
+[System.Serializable] // Character prefab and id
+public class CharacterModel { public string characterId; public GameObject prefab; }
 
 [System.Serializable] // Line of dialogue and character speaking
 public partial class DialogueLine { public string characterId; public string content; }
