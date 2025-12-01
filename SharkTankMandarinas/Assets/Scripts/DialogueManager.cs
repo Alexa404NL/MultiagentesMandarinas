@@ -23,6 +23,8 @@ public class DialogueManager : MonoBehaviour
     [SerializeField] private List<CharacterModel> characterModels;
     // a small runtime lookup cache for fast prefab lookup
     private Dictionary<string, GameObject> characterModelCache = new Dictionary<string, GameObject>();
+    // idle instances for characters (either scene objects or instantiated prefabs that represent idle/background versions)
+    private Dictionary<string, GameObject> idleInstances = new Dictionary<string, GameObject>();
     private GameObject currentModelInstance = null;
     private string currentCharacterId = null;
     private bool currentModelIsScene = false;
@@ -94,25 +96,70 @@ public class DialogueManager : MonoBehaviour
         {
             foreach (var profile in characterModels)
             {
-                if (profile == null || profile.prefab == null) continue;
+                if (profile == null || (profile.prefab == null && profile.activePrefab == null && profile.idlePrefab == null)) continue;
                 // If this GameObject belongs to the scene (IsValid), treat it as a scene instance and hide it now.
-                if (profile.prefab.scene.IsValid())
+                // For backward compatibility, profile.prefab is the old single prefab field; prefer the new fields if they exist.
+                // Add any idle instances for profile.id
+                if (profile.idlePrefab != null)
                 {
-                    characterModelCache[profile.characterId] = profile.prefab;
+                    if (profile.idlePrefab.scene.IsValid())
+                    {
+                        idleInstances[profile.characterId] = profile.idlePrefab;
+                        try
+                        {
+                            profile.idlePrefab.SetActive(true); // keep idles visible by default
+                            Debug.Log($"DialogueManager: Enabled idle scene model for id '{profile.characterId}' (name '{profile.idlePrefab.name}').");
+                        }
+                        catch (System.Exception ex)
+                        {
+                            Debug.LogWarning($"DialogueManager: Failed to enable idle scene model for id '{profile.characterId}' (name '{profile.idlePrefab.name}'): {ex.Message}");
+                        }
+                    }
+                    else
+                    {
+                        // instantiate idle prefab into the scene and keep it visible
+                        try
+                        {
+                            var idleInst = (characterModelParent != null) ? Instantiate(profile.idlePrefab, characterModelParent.transform) : Instantiate(profile.idlePrefab);
+                            idleInstances[profile.characterId] = idleInst;
+                            idleInst.SetActive(true);
+                        }
+                        catch (System.Exception ex)
+                        {
+                            Debug.LogWarning($"DialogueManager: Failed to instantiate idle prefab for id '{profile.characterId}': {ex.Message}");
+                        }
+                    }
+                }
+                if (profile.activePrefab == null)
+                {
+                    // Backwards compatibility: use 'prefab' as activePrefab if the new field is absent
+                    profile.activePrefab = profile.prefab;
+                }
+                if (profile.idlePrefab == null && profile.prefab != null && profile.prefab.scene.IsValid())
+                {
+                    // If idle prefab wasn't set but the legacy prefab is scene instance, treat that as idle
+                    idleInstances[profile.characterId] = profile.prefab;
+                    try { profile.prefab.SetActive(true); } catch {}
+                }
+                // For active prefab: hide scene-placed active prefab
+                if (profile.activePrefab != null && profile.activePrefab.scene.IsValid())
+                {
+                    // Hide active scene instance: we'll use it only when speaking
+                    characterModelCache[profile.characterId] = profile.activePrefab;
                     try
                     {
-                        profile.prefab.SetActive(false);
-                        Debug.Log($"DialogueManager: Hid scene model for id '{profile.characterId}' (name '{profile.prefab.name}').");
+                        profile.activePrefab.SetActive(false);
+                        Debug.Log($"DialogueManager: Hid active scene model for id '{profile.characterId}' (name '{profile.activePrefab.name}').");
                     }
                     catch (System.Exception ex)
                     {
-                        Debug.LogWarning($"DialogueManager: Failed to hide scene model for id '{profile.characterId}' (name '{profile.prefab.name}'): {ex.Message}");
+                        Debug.LogWarning($"DialogueManager: Failed to hide active scene model for id '{profile.characterId}' (name '{profile.activePrefab.name}'): {ex.Message}");
                     }
                 }
                 else
                 {
                     // It's a prefab asset - we'll instantiate when needed.
-                    characterModelCache[profile.characterId] = profile.prefab;
+                    characterModelCache[profile.characterId] = profile.activePrefab ?? profile.prefab;
                 }
             }
         }
@@ -206,10 +253,34 @@ public class DialogueManager : MonoBehaviour
         if (dialogueQueue.Count == 0)
         {
             Debug.Log("Conversation ended.");
+            // When conversation ends, hide any active model and show its idle counterpart (if any)
+            if (!string.IsNullOrEmpty(currentCharacterId))
+            {
+                if (currentModelInstance != null)
+                {
+                    if (currentModelIsScene) currentModelInstance.SetActive(false);
+                    else Destroy(currentModelInstance);
+                    currentModelInstance = null;
+                }
+                if (idleInstances.TryGetValue(currentCharacterId, out var idlePrev))
+                {
+                    if (idlePrev != null) idlePrev.SetActive(true);
+                }
+                currentCharacterId = null;
+            }
             return;
         }
 
         DialogueLine currentLine = dialogueQueue.Dequeue();
+
+        // If the character changed since the last page, show the previous idle model if any
+        if (!string.IsNullOrEmpty(currentCharacterId) && currentCharacterId != currentLine.characterId)
+        {
+            if (idleInstances.TryGetValue(currentCharacterId, out var idlePrev))
+            {
+                if (idlePrev != null) idlePrev.SetActive(true);
+            }
+        }
 
         characterName.text = currentLine.characterId;
         dialogueText.text = currentLine.content;
@@ -243,6 +314,11 @@ public class DialogueManager : MonoBehaviour
         }
         else if (modelRef != null)
         {
+            // Hide the idle model for the new speaking character (if present)
+            if (idleInstances.TryGetValue(currentLine.characterId, out var idleNew))
+            {
+                if (idleNew != null) idleNew.SetActive(false);
+            }
             // Determine if the modelRef is a scene instance or a prefab asset.
             bool isSceneInstance = modelRef.scene.IsValid();
 
@@ -323,8 +399,9 @@ public class DialogueManager : MonoBehaviour
         {
             if (profile.characterId == id)
             {
-                characterModelCache[id] = profile.prefab;
-                return profile.prefab;
+                var refPrefab = profile.activePrefab ?? profile.prefab;
+                characterModelCache[id] = refPrefab;
+                return refPrefab;
             }
         }
         // found none
@@ -522,7 +599,7 @@ public class DialogueManager : MonoBehaviour
 public class QnAData { public string question; public string answer; }
 
 [System.Serializable] // Character prefab and id
-public class CharacterModel { public string characterId; public GameObject prefab; }
+public class CharacterModel { public string characterId; public GameObject prefab; public GameObject activePrefab; public GameObject idlePrefab; }
 
 [System.Serializable] // Line of dialogue and character speaking
 public partial class DialogueLine { public string characterId; public string content; }
