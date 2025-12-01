@@ -24,6 +24,8 @@ public class DialogueManager : MonoBehaviour
     // a small runtime lookup cache for fast prefab lookup
     private Dictionary<string, GameObject> characterModelCache = new Dictionary<string, GameObject>();
     private GameObject currentModelInstance = null;
+    private string currentCharacterId = null;
+    private bool currentModelIsScene = false;
 
     [Header("Pagination")]
     [SerializeField] private bool enablePagination = true;
@@ -87,6 +89,34 @@ public class DialogueManager : MonoBehaviour
                 dialogueBoxRect = dialogueText.rectTransform.parent as RectTransform;
         }
         
+        // Prepare character model lookup cache and hide any scene placed character models.
+        if (characterModels != null)
+        {
+            foreach (var profile in characterModels)
+            {
+                if (profile == null || profile.prefab == null) continue;
+                // If this GameObject belongs to the scene (IsValid), treat it as a scene instance and hide it now.
+                if (profile.prefab.scene.IsValid())
+                {
+                    characterModelCache[profile.characterId] = profile.prefab;
+                    try
+                    {
+                        profile.prefab.SetActive(false);
+                        Debug.Log($"DialogueManager: Hid scene model for id '{profile.characterId}' (name '{profile.prefab.name}').");
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogWarning($"DialogueManager: Failed to hide scene model for id '{profile.characterId}' (name '{profile.prefab.name}'): {ex.Message}");
+                    }
+                }
+                else
+                {
+                    // It's a prefab asset - we'll instantiate when needed.
+                    characterModelCache[profile.characterId] = profile.prefab;
+                }
+            }
+        }
+
         // should actually start with a short conversation with the sharks
         // but we havent written it yet
         SwitchToQNAMode(); 
@@ -184,29 +214,96 @@ public class DialogueManager : MonoBehaviour
         characterName.text = currentLine.characterId;
         dialogueText.text = currentLine.content;
 
-        GameObject prefab = GetModelPrefabById(currentLine.characterId);
-        if (prefab != null && characterModelParent != null)
+        GameObject modelRef = GetModelPrefabById(currentLine.characterId);
+        // Only switch models if the character ID changed, otherwise leave current model in place
+        if (currentCharacterId == currentLine.characterId)
         {
-            // Destroy the old model instance if present
+            // If we don't currently have an instance but a modelRef exists, create/enable it
+            if (currentModelInstance == null && modelRef != null)
+            {
+                bool isSceneInstance = modelRef.scene.IsValid();
+                if (isSceneInstance)
+                {
+                    modelRef.SetActive(true);
+                    currentModelInstance = modelRef;
+                    currentModelIsScene = true;
+                }
+                else
+                {
+                    if (characterModelParent != null)
+                        currentModelInstance = Instantiate(modelRef, characterModelParent.transform);
+                    else
+                        currentModelInstance = Instantiate(modelRef);
+                    currentModelInstance.transform.localPosition = Vector3.zero;
+                    currentModelInstance.transform.localRotation = Quaternion.identity;
+                    currentModelInstance.SetActive(true);
+                    currentModelIsScene = false;
+                }
+            }
+        }
+        else if (modelRef != null)
+        {
+            // Determine if the modelRef is a scene instance or a prefab asset.
+            bool isSceneInstance = modelRef.scene.IsValid();
+
+            // Clean up previous currentModelInstance
             if (currentModelInstance != null)
             {
-                Destroy(currentModelInstance);
+                if (currentModelIsScene)
+                {
+                    // Don't destroy scene instances, just hide them
+                    currentModelInstance.SetActive(false);
+                }
+                else
+                {
+                    // Destroy the previously instantiated prefab instance
+                    Destroy(currentModelInstance);
+                }
                 currentModelInstance = null;
             }
-            // Instantiate the new model as a child of the parent container
-            currentModelInstance = Instantiate(prefab, characterModelParent.transform);
-            currentModelInstance.transform.localPosition = Vector3.zero;
-            currentModelInstance.transform.localRotation = Quaternion.identity;
-            currentModelInstance.SetActive(true);
+
+            if (isSceneInstance)
+            {
+                // Just enable the existing scene model instance. Do NOT reparent or change transform - it's placed as desired in the scene.
+                modelRef.SetActive(true);
+                currentModelInstance = modelRef;
+                currentModelIsScene = true;
+            }
+            else
+            {
+                // Instantiate the prefab asset under the characterModelParent (respect parented transform)
+                if (characterModelParent != null)
+                {
+                    currentModelInstance = Instantiate(modelRef, characterModelParent.transform);
+                }
+                else
+                {
+                    // No parent specified - instantiate at origin
+                    currentModelInstance = Instantiate(modelRef);
+                }
+                currentModelInstance.transform.localPosition = Vector3.zero;
+                currentModelInstance.transform.localRotation = Quaternion.identity;
+                currentModelInstance.SetActive(true);
+                currentModelIsScene = false;
+            }
+            currentCharacterId = currentLine.characterId;
         }
         else
         {
-            // No model found - destroy any existing instance
-            if (currentModelInstance != null)
+            // No model found - hide or destroy previous instance (only if the character changed)
+            if (currentModelInstance != null && currentCharacterId != currentLine.characterId)
             {
-                Destroy(currentModelInstance);
+                if (currentModelIsScene)
+                {
+                    currentModelInstance.SetActive(false);
+                }
+                else
+                {
+                    Destroy(currentModelInstance);
+                }
                 currentModelInstance = null;
             }
+            currentCharacterId = currentLine.characterId;
         }
         // Update page indicator
         if (pageIndicatorText != null)
