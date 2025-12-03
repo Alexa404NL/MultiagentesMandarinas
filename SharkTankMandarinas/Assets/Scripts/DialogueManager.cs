@@ -6,6 +6,12 @@ using System.Text;
 
 public class DialogueManager : MonoBehaviour
 {
+    [Header("Server Configuration")]
+    [SerializeField, Tooltip("Cliente para comunicarse con los agentes de Colab")]
+    private ColabAgentClient colabClient;
+    [SerializeField, Tooltip("Si es true, espera la respuesta del servidor antes de continuar al diálogo")]
+    private bool waitForServerResponse = true;
+
     [Header("Phase 2: QNA")]
     [SerializeField] private GameObject interviewPanel;
     [SerializeField] private TMP_Text questionText;
@@ -19,7 +25,11 @@ public class DialogueManager : MonoBehaviour
     [SerializeField] private TMP_Text dialogueText;
     [SerializeField] private TMP_Text pageIndicatorText;
     [SerializeField] private Button nextButton;
-    [SerializeField] private TextAsset dialogueJson;
+    [SerializeField, Tooltip("JSON estático de respaldo si no se puede obtener del servidor")]
+    private TextAsset dialogueJson;
+    
+    // JSON dinámico recibido del servidor
+    private string dynamicDialogueJson = null;
     [SerializeField] private List<CharacterModel> characterModels;
     // a small runtime lookup cache for fast prefab lookup
     private Dictionary<string, GameObject> characterModelCache = new Dictionary<string, GameObject>();
@@ -66,6 +76,16 @@ public class DialogueManager : MonoBehaviour
 
     private void Start()
     {
+        // Auto-asignar ColabAgentClient si no está configurado
+        if (colabClient == null)
+        {
+            colabClient = gameObject.GetComponent<ColabAgentClient>();
+            if (colabClient == null)
+            {
+                colabClient = gameObject.AddComponent<ColabAgentClient>();
+            }
+        }
+
         submitButton.onClick.AddListener(OnSubmitAnswer);
         nextButton.onClick.AddListener(OnNextDialogueLine);
         // Auto-assign dialogueBoxRect if missing by searching for a parent RectTransform named "Dialogue Box" (case-insensitive)
@@ -207,15 +227,67 @@ public class DialogueManager : MonoBehaviour
     private void FinishInterview()
     {
         Debug.Log("QNA completed.");
+        
+        // Convertir las respuestas a un diccionario
+        Dictionary<string, string> businessData = new Dictionary<string, string>();
         for (int i = 0; i < collectedAnswers.Count; i++)
         {
             Debug.Log($"{collectedAnswers[i].question}: {collectedAnswers[i].answer}");
+            businessData[collectedAnswers[i].question] = collectedAnswers[i].answer;
         }
-        // need to save answers to JSON here
-        
-        // the loading screen scene should go HERE
 
-        SwitchToDialogueMode(); 
+        // Enviar el pitch al servidor de Colab
+        if (colabClient != null)
+        {
+            Debug.Log("Sending entrepreneur pitch to Colab server...");
+            
+            colabClient.SendEntrepreneurPitch(
+                businessData,
+                onSuccess: (conversationJson) => 
+                {
+                    Debug.Log("Received conversation history from server.");
+                    
+                    // Guardar el JSON dinámico para usarlo en el diálogo
+                    dynamicDialogueJson = conversationJson;
+                    
+                    // Opcionalmente guardarlo a archivo para inspección
+                    colabClient.SaveConversationToFile(conversationJson, "conversation_history.json");
+                    
+                    if (waitForServerResponse)
+                    {
+                        Debug.Log("Server responded. Proceeding to dialogue mode with dynamic conversation.");
+                        // Cambiar al modo diálogo con el JSON dinámico
+                        SwitchToDialogueMode();
+                    }
+                },
+                onError: (error) => 
+                {
+                    Debug.LogError($"Error communicating with server: {error}");
+                    Debug.LogWarning("Proceeding to dialogue mode with fallback static JSON.");
+                    
+                    // Si hay error, usar el JSON estático como fallback
+                    dynamicDialogueJson = null;
+                    
+                    if (waitForServerResponse)
+                    {
+                        // Continuar al diálogo con JSON estático
+                        SwitchToDialogueMode();
+                    }
+                }
+            );
+        }
+        else
+        {
+            Debug.LogWarning("ColabAgentClient not configured. Skipping server communication.");
+            dynamicDialogueJson = null;
+        }
+        
+        // Si NO esperamos respuesta del servidor, continuar inmediatamente con JSON estático
+        if (!waitForServerResponse)
+        {
+            SwitchToDialogueMode();
+        }
+        // Si waitForServerResponse = true, SwitchToDialogueMode() se llamará desde el callback onSuccess
     }
 
     // DIALOGUE PHASE
@@ -225,8 +297,26 @@ public class DialogueManager : MonoBehaviour
         interviewPanel.SetActive(false);
         dialoguePanel.SetActive(true);
 
-        // dialogue is received as a JSON
-        ConversationWrapper wrapper = JsonUtility.FromJson<ConversationWrapper>(dialogueJson.text);
+        // Usar el JSON dinámico del servidor si está disponible, si no usar el estático
+        string jsonToUse = null;
+        
+        if (!string.IsNullOrEmpty(dynamicDialogueJson))
+        {
+            Debug.Log("Using dynamic conversation from server.");
+            jsonToUse = dynamicDialogueJson;
+        }
+        else if (dialogueJson != null)
+        {
+            Debug.Log("Using static fallback conversation JSON.");
+            jsonToUse = dialogueJson.text;
+        }
+        else
+        {
+            Debug.LogError("No conversation JSON available (neither dynamic nor static)!");
+            return;
+        }
+
+        ConversationWrapper wrapper = JsonUtility.FromJson<ConversationWrapper>(jsonToUse);
         
         dialogueQueue.Clear();
         foreach (var line in wrapper.conversation)
