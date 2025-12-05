@@ -3,6 +3,7 @@ using UnityEngine.Networking;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;
+using Newtonsoft.Json;
 
 /// <summary>
 /// Cliente para comunicarse con los agentes de CrewAI corriendo en Google Colab.
@@ -67,24 +68,25 @@ public class ColabAgentClient : MonoBehaviour
     /// <summary>
     /// Envía un mensaje al servidor de Colab.
     /// </summary>
-    private string SendMessageCoroutine2(Dictionary<string, string> businessData, System.Action<string> onSuccess, System.Action<string> onError)
+    private IEnumerator SendMessageCoroutine2(Dictionary<string, string> businessData, System.Action<string> onSuccess, System.Action<string> onError)
     {
+        Debug.Log("Starting SendMessageCoroutine2");
         if (string.IsNullOrEmpty(serverUrl))
         {
             onError?.Invoke("Server URL is not configured. Please set the ngrok URL in the Inspector.");
-            return "";
         }
 
-        string jsonPayload = JsonUtility.ToJson(businessData);
+        string jsonPayload = JsonConvert.SerializeObject(businessData);
 
         if (logResponses)
         {
-            Debug.Log($"Sending message to {serverUrl}/submit_message");
+            Debug.Log($"Sending message to {serverUrl}/initiate_pitch");
             Debug.Log($"Payload: {jsonPayload}");
         }
 
         // Crear la petición HTTP POST
         string url = serverUrl.TrimEnd('/') + "/initiate_pitch";
+        Debug.Log($"Sending message to {url}");
         using (UnityWebRequest request = new UnityWebRequest(url, "POST"))
         {
             byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonPayload);
@@ -93,7 +95,7 @@ public class ColabAgentClient : MonoBehaviour
             request.SetRequestHeader("Content-Type", "application/json");
 
             // Enviar la petición
-            request.SendWebRequest();
+            yield return request.SendWebRequest();
 
             // Manejar la respuesta
             if (request.result == UnityWebRequest.Result.Success)
@@ -101,9 +103,11 @@ public class ColabAgentClient : MonoBehaviour
                 if (logResponses)
                 {
                     Debug.Log($"Response received: {request.downloadHandler.text}");
-                    return request.downloadHandler.text;
                 }
+
+                onSuccess?.Invoke("Message sent successfully.");
 /* 
+
                 try
                 {
                     ServerResponse response = JsonUtility.FromJson<ServerResponse>(request.downloadHandler.text);
@@ -136,7 +140,6 @@ public class ColabAgentClient : MonoBehaviour
                 onError?.Invoke(errorMsg);
             }
         }
-        return "";
     }
 
     /// <summary>
@@ -148,17 +151,10 @@ public class ColabAgentClient : MonoBehaviour
     public void SendEntrepreneurPitch(Dictionary<string, string> businessData, System.Action<string> onSuccess, System.Action<string> onError)
     {
         // Construir el pitch del emprendedor usando los datos del cuestionario
-        string pitch = BuildPitchFromData(businessData, onSuccess, onError);
-        StartCoroutine(SendMessageAndGetHistoryCoroutine(pitch, "Entrepreneur", onSuccess, onError));
-    }
-
-    /// <summary>
-    /// Construye el texto del pitch usando las respuestas del cuestionario.
-    /// </summary>
-    private string BuildPitchFromData(Dictionary<string, string> data, System.Action<string> onSuccess, System.Action<string> onError)
-    {
-        string pitch = SendMessageCoroutine2(data, onSuccess, onError);
-        return pitch;
+        /* string pitch = BuildPitchFromData(businessData, onSuccess, onError);
+        StartCoroutine(SendMessageAndGetHistoryCoroutine(pitch, "Entrepreneur", onSuccess, onError)); */
+        Debug.Log("Starting SendEntrepreneurPitch");
+        StartCoroutine(SendMessageAndGetHistoryCoroutine(businessData, onSuccess, onError));
     }
 
     private string GetValue(Dictionary<string, string> dict, string key)
@@ -169,13 +165,12 @@ public class ColabAgentClient : MonoBehaviour
     /// <summary>
     /// Envía un mensaje al servidor y luego obtiene el historial completo de conversación.
     /// </summary>
-    private IEnumerator SendMessageAndGetHistoryCoroutine(string content, string sender, System.Action<string> onSuccess, System.Action<string> onError)
+    private IEnumerator SendMessageAndGetHistoryCoroutine(Dictionary<string, string> businessData, System.Action<string> onSuccess, System.Action<string> onError)
     {
-        // Primero enviar el mensaje
         bool messageSent = false;
         string sendError = null;
 
-        yield return SendMessageCoroutine(content, sender, 
+        yield return SendMessageCoroutine2(businessData, 
             (response) => { messageSent = true; },
             (error) => { sendError = error; });
 
@@ -186,90 +181,11 @@ public class ColabAgentClient : MonoBehaviour
         }
 
         // Esperar un poco para que el servidor procese
-        yield return new WaitForSeconds(2f);
+        // yield return new WaitForSeconds(10f);
 
         // Luego obtener el historial completo
+        Debug.Log("starting GetAndFormatConversationHistoryCoroutine");
         yield return GetAndFormatConversationHistoryCoroutine(onSuccess, onError);
-    }
-
-    /// <summary>
-    /// Envía un mensaje al servidor de Colab.
-    /// </summary>
-    private IEnumerator SendMessageCoroutine(string content, string sender, System.Action<string> onSuccess, System.Action<string> onError)
-    {
-        if (string.IsNullOrEmpty(serverUrl))
-        {
-            onError?.Invoke("Server URL is not configured. Please set the ngrok URL in the Inspector.");
-            yield break;
-        }
-
-        // Crear el payload JSON
-        MessagePayload payload = new MessagePayload
-        {
-            content = content,
-            sender = sender
-        };
-
-        string jsonPayload = JsonUtility.ToJson(payload);
-
-        if (logResponses)
-        {
-            Debug.Log($"Sending message to {serverUrl}/submit_message");
-            Debug.Log($"Payload: {jsonPayload}");
-        }
-
-        // Crear la petición HTTP POST
-        string url = serverUrl.TrimEnd('/') + "/submit_message";
-        using (UnityWebRequest request = new UnityWebRequest(url, "POST"))
-        {
-            byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonPayload);
-            request.uploadHandler = new UploadHandlerRaw(bodyRaw);
-            request.downloadHandler = new DownloadHandlerBuffer();
-            request.SetRequestHeader("Content-Type", "application/json");
-
-            // Enviar la petición
-            yield return request.SendWebRequest();
-
-            // Manejar la respuesta
-            if (request.result == UnityWebRequest.Result.Success)
-            {
-                if (logResponses)
-                {
-                    Debug.Log($"Response received: {request.downloadHandler.text}");
-                }
-
-                try
-                {
-                    ServerResponse response = JsonUtility.FromJson<ServerResponse>(request.downloadHandler.text);
-                    
-                    if (response.status == "success" && !string.IsNullOrEmpty(response.response))
-                    {
-                        // El servidor respondió con la evaluación del juez
-                        onSuccess?.Invoke(response.response);
-                    }
-                    else if (response.status == "success")
-                    {
-                        // Mensaje recibido pero sin respuesta inmediata
-                        onSuccess?.Invoke("Message sent successfully. Waiting for judge's response...");
-                    }
-                    else
-                    {
-                        onError?.Invoke($"Server returned error status: {response.status}");
-                    }
-                }
-                catch (System.Exception ex)
-                {
-                    Debug.LogError($"Error parsing server response: {ex.Message}");
-                    onError?.Invoke($"Error parsing response: {ex.Message}");
-                }
-            }
-            else
-            {
-                string errorMsg = $"Network error: {request.error}\nResponse code: {request.responseCode}";
-                Debug.LogError(errorMsg);
-                onError?.Invoke(errorMsg);
-            }
-        }
     }
 
     /// <summary>
@@ -289,6 +205,7 @@ public class ColabAgentClient : MonoBehaviour
         string historyJson = null;
         string historyError = null;
 
+        Debug.Log("starting GetConversationHistoryCoroutine");
         yield return GetConversationHistoryCoroutine(
             (json) => 
             {
@@ -362,6 +279,7 @@ public class ColabAgentClient : MonoBehaviour
 
         string url = serverUrl.TrimEnd('/') + "/conversation_history";
         
+        Debug.Log($"sending request to {url}");
         using (UnityWebRequest request = UnityWebRequest.Get(url))
         {
             yield return request.SendWebRequest();
