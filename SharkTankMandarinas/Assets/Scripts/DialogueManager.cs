@@ -13,6 +13,14 @@ public class DialogueManager : MonoBehaviour
     [SerializeField, Tooltip("Si es true, espera la respuesta del servidor antes de continuar al diálogo")]
     private bool waitForServerResponse = true;
 
+    [Header("Loading Screen")]
+    [SerializeField, Tooltip("Loading screen prefab/panel to show while waiting for server response")]
+    private GameObject loadingScreen;
+    [SerializeField, Tooltip("List of canvases to hide during loading")]
+    private List<Canvas> canvasesToHideDuringLoading;
+    [SerializeField, Tooltip("If true, hides all character models during loading")]
+    private bool hideCharactersDuringLoading = true;
+
     [Header("Phase 2: QNA")]
     [SerializeField] private GameObject interviewPanel;
     [SerializeField] private TMP_Text questionText;
@@ -104,6 +112,10 @@ public class DialogueManager : MonoBehaviour
             {
                 colabClient = gameObject.AddComponent<ColabAgentClient>();
             }
+        }
+        if (loadingScreen != null)
+        {
+            loadingScreen.SetActive(false);
         }
 
         submitButton.onClick.AddListener(OnSubmitAnswer);
@@ -213,6 +225,106 @@ public class DialogueManager : MonoBehaviour
         SwitchToQNAMode(); 
     }
 
+    // LOADING SCREEN
+
+    /// <summary>
+    /// Shows the loading screen and hides characters/canvases.
+    /// </summary>
+    private void ShowLoadingScreen()
+    {
+        Debug.Log("Showing loading screen...");
+        
+        // Hide interview panel
+        if (interviewPanel != null)
+            interviewPanel.SetActive(false);
+        
+        // Hide dialogue panel
+        if (dialoguePanel != null)
+            dialoguePanel.SetActive(false);
+        
+        // Hide specified canvases
+        if (canvasesToHideDuringLoading != null)
+        {
+            foreach (var canvas in canvasesToHideDuringLoading)
+            {
+                if (canvas != null)
+                    canvas.gameObject.SetActive(false);
+            }
+        }
+        
+        // Hide all character models
+        if (hideCharactersDuringLoading)
+        {
+            // Hide current active model
+            if (currentModelInstance != null)
+            {
+                currentModelInstance.SetActive(false);
+            }
+            
+            // Hide all idle instances
+            foreach (var kvp in idleInstances)
+            {
+                if (kvp.Value != null)
+                    kvp.Value.SetActive(false);
+            }
+            
+            // Hide character model parent if it exists
+            if (characterModelParent != null)
+                characterModelParent.SetActive(false);
+        }
+        
+        // Show loading screen
+        if (loadingScreen != null)
+        {
+            loadingScreen.SetActive(true);
+        }
+        else
+        {
+            Debug.LogWarning("Loading screen not assigned!");
+        }
+    }
+
+    /// <summary>
+    /// Hides the loading screen and restores characters/canvases.
+    /// </summary>
+    private void HideLoadingScreen()
+    {
+        Debug.Log("Hiding loading screen...");
+        
+        // Hide loading screen
+        if (loadingScreen != null)
+        {
+            loadingScreen.SetActive(false);
+        }
+        
+        // Restore specified canvases
+        if (canvasesToHideDuringLoading != null)
+        {
+            foreach (var canvas in canvasesToHideDuringLoading)
+            {
+                if (canvas != null)
+                    canvas.gameObject.SetActive(true);
+            }
+        }
+        
+        // Restore character models
+        if (hideCharactersDuringLoading)
+        {
+            // Restore character model parent
+            if (characterModelParent != null)
+                characterModelParent.SetActive(true);
+            
+            // Restore idle instances
+            foreach (var kvp in idleInstances)
+            {
+                if (kvp.Value != null)
+                    kvp.Value.SetActive(true);
+            }
+            
+            // Note: currentModelInstance will be managed by SwitchToDialogueMode/ShowNextDialogueLine
+        }
+    }
+
     // QNA PHASE
 
     private void SwitchToQNAMode()
@@ -287,6 +399,12 @@ public class DialogueManager : MonoBehaviour
             businessData[collectedAnswers[i].question] = collectedAnswers[i].answer;
         }
 
+        // Show loading screen while waiting for server
+        if (waitForServerResponse)
+        {
+            ShowLoadingScreen();
+        }
+
         // Enviar el pitch al servidor de Colab
         if (colabClient != null)
         {
@@ -307,6 +425,8 @@ public class DialogueManager : MonoBehaviour
                     if (waitForServerResponse)
                     {
                         Debug.Log("Server responded. Proceeding to dialogue mode with dynamic conversation.");
+                        // Hide loading screen
+                        HideLoadingScreen();
                         // Cambiar al modo diálogo con el JSON dinámico
                         SwitchToDialogueMode();
                     }
@@ -321,6 +441,8 @@ public class DialogueManager : MonoBehaviour
                     
                     if (waitForServerResponse)
                     {
+                        // Hide loading screen
+                        HideLoadingScreen();
                         // Continuar al diálogo con JSON estático
                         SwitchToDialogueMode();
                     }
@@ -331,6 +453,8 @@ public class DialogueManager : MonoBehaviour
         {
             Debug.LogWarning("ColabAgentClient not configured. Skipping server communication.");
             dynamicDialogueJson = null;
+            // Hide loading if shown
+            HideLoadingScreen();
         }
         
         // Si NO esperamos respuesta del servidor, continuar inmediatamente con JSON estático
