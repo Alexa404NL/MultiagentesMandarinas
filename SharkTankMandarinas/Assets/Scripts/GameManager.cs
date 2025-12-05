@@ -25,7 +25,12 @@ public class GameManager : MonoBehaviour
         SceneManager.LoadScene(1);
     }
 
+    public void LoadMainMenu()
+    {
+        SceneManager.LoadScene(0);
+    }
 
+    
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {

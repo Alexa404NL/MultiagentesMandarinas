@@ -36,6 +36,10 @@ public class DialogueManager : MonoBehaviour
     [SerializeField] private Button nextButton;
     [SerializeField, Tooltip("JSON estático de respaldo si no se puede obtener del servidor")]
     private TextAsset dialogueJson;
+
+    [Header("End Screen")]
+    [SerializeField, Tooltip("Panel to show when conversation ends (Thanks for playing)")]
+    private GameObject endScreen;
     
     // JSON dinámico recibido del servidor
     private string dynamicDialogueJson = null;
@@ -116,6 +120,10 @@ public class DialogueManager : MonoBehaviour
         if (loadingScreen != null)
         {
             loadingScreen.SetActive(false);
+        }
+        if (endScreen != null)
+        {
+            endScreen.SetActive(false);
         }
 
         submitButton.onClick.AddListener(OnSubmitAnswer);
@@ -322,6 +330,41 @@ public class DialogueManager : MonoBehaviour
             }
             
             // Note: currentModelInstance will be managed by SwitchToDialogueMode/ShowNextDialogueLine
+        }
+    }
+
+    // END SCREEN
+
+    /// <summary>
+    /// Shows the end screen (Thanks for playing) and hides the dialogue UI.
+    /// </summary>
+    private void ShowEndScreen()
+    {
+        Debug.Log("Showing end screen...");
+        
+        // Hide dialogue panel
+        if (dialoguePanel != null)
+            dialoguePanel.SetActive(false);
+        
+        // Hide all character models
+        if (characterModelParent != null)
+            characterModelParent.SetActive(false);
+        
+        // Hide all idle instances
+        foreach (var kvp in idleInstances)
+        {
+            if (kvp.Value != null)
+                kvp.Value.SetActive(false);
+        }
+        
+        // Show end screen
+        if (endScreen != null)
+        {
+            endScreen.SetActive(true);
+        }
+        else
+        {
+            Debug.LogWarning("End screen not assigned!");
         }
     }
 
@@ -548,6 +591,9 @@ public class DialogueManager : MonoBehaviour
                 }
                 currentCharacterId = null;
             }
+            
+            // Show end screen and hide dialogue
+            ShowEndScreen();
             return;
         }
 
