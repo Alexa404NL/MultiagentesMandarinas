@@ -3,6 +3,7 @@ using UnityEngine.Networking;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;
+using Newtonsoft.Json;
 
 /// <summary>
 /// Cliente para comunicarse con los agentes de CrewAI corriendo en Google Colab.
@@ -65,103 +66,27 @@ public class ColabAgentClient : MonoBehaviour
     }
 
     /// <summary>
-    /// Envía el pitch del emprendedor al servidor de Colab.
-    /// </summary>
-    /// <param name="businessData">Diccionario con las respuestas del cuestionario</param>
-    /// <param name="onSuccess">Callback cuando se recibe respuesta exitosa del juez - retorna el JSON de conversación</param>
-    /// <param name="onError">Callback si hay un error</param>
-    public void SendEntrepreneurPitch(Dictionary<string, string> businessData, System.Action<string> onSuccess, System.Action<string> onError)
-    {
-        // Construir el pitch del emprendedor usando los datos del cuestionario
-        string pitch = BuildPitchFromData(businessData);
-        StartCoroutine(SendMessageAndGetHistoryCoroutine(pitch, "Entrepreneur", onSuccess, onError));
-    }
-
-    /// <summary>
-    /// Construye el texto del pitch usando las respuestas del cuestionario.
-    /// </summary>
-    private string BuildPitchFromData(Dictionary<string, string> data)
-    {
-        StringBuilder pitchBuilder = new StringBuilder();
-        
-        pitchBuilder.AppendLine($"Ladies and gentlemen of Shark Tank, thank you for this opportunity to present {GetValue(data, "name")}.");
-        pitchBuilder.AppendLine();
-        pitchBuilder.AppendLine(GetValue(data, "description"));
-        pitchBuilder.AppendLine();
-        pitchBuilder.AppendLine($"Our target market is: {GetValue(data, "target_market")}");
-        pitchBuilder.AppendLine();
-        pitchBuilder.AppendLine($"Our revenue model: {GetValue(data, "revenue_model")}");
-        pitchBuilder.AppendLine();
-        pitchBuilder.AppendLine($"Current traction: {GetValue(data, "current_traction")}");
-        pitchBuilder.AppendLine();
-        pitchBuilder.AppendLine($"Today, I'm seeking {GetValue(data, "investment_needed")}.");
-        pitchBuilder.AppendLine();
-        pitchBuilder.AppendLine($"We will use the funds for: {GetValue(data, "use_of_funds")}");
-        pitchBuilder.AppendLine();
-        pitchBuilder.AppendLine("Thank you for considering our proposal!");
-
-        return pitchBuilder.ToString();
-    }
-
-    private string GetValue(Dictionary<string, string> dict, string key)
-    {
-        return dict.ContainsKey(key) ? dict[key] : $"[{key} not provided]";
-    }
-
-    /// <summary>
-    /// Envía un mensaje al servidor y luego obtiene el historial completo de conversación.
-    /// </summary>
-    private IEnumerator SendMessageAndGetHistoryCoroutine(string content, string sender, System.Action<string> onSuccess, System.Action<string> onError)
-    {
-        // Primero enviar el mensaje
-        bool messageSent = false;
-        string sendError = null;
-
-        yield return SendMessageCoroutine(content, sender, 
-            (response) => { messageSent = true; },
-            (error) => { sendError = error; });
-
-        if (!messageSent || sendError != null)
-        {
-            onError?.Invoke(sendError ?? "Failed to send message");
-            yield break;
-        }
-
-        // Esperar un poco para que el servidor procese
-        yield return new WaitForSeconds(2f);
-
-        // Luego obtener el historial completo
-        yield return GetAndFormatConversationHistoryCoroutine(onSuccess, onError);
-    }
-
-    /// <summary>
     /// Envía un mensaje al servidor de Colab.
     /// </summary>
-    private IEnumerator SendMessageCoroutine(string content, string sender, System.Action<string> onSuccess, System.Action<string> onError)
+    private IEnumerator SendMessageCoroutine2(Dictionary<string, string> businessData, System.Action<string> onSuccess, System.Action<string> onError)
     {
+        Debug.Log("Starting SendMessageCoroutine2");
         if (string.IsNullOrEmpty(serverUrl))
         {
             onError?.Invoke("Server URL is not configured. Please set the ngrok URL in the Inspector.");
-            yield break;
         }
 
-        // Crear el payload JSON
-        MessagePayload payload = new MessagePayload
-        {
-            content = content,
-            sender = sender
-        };
-
-        string jsonPayload = JsonUtility.ToJson(payload);
+        string jsonPayload = JsonConvert.SerializeObject(businessData);
 
         if (logResponses)
         {
-            Debug.Log($"Sending message to {serverUrl}/submit_message");
+            Debug.Log($"Sending message to {serverUrl}/initiate_pitch");
             Debug.Log($"Payload: {jsonPayload}");
         }
 
         // Crear la petición HTTP POST
-        string url = serverUrl.TrimEnd('/') + "/submit_message";
+        string url = serverUrl.TrimEnd('/') + "/initiate_pitch";
+        Debug.Log($"Sending message to {url}");
         using (UnityWebRequest request = new UnityWebRequest(url, "POST"))
         {
             byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonPayload);
@@ -179,6 +104,9 @@ public class ColabAgentClient : MonoBehaviour
                 {
                     Debug.Log($"Response received: {request.downloadHandler.text}");
                 }
+
+                onSuccess?.Invoke("Message sent successfully.");
+/* 
 
                 try
                 {
@@ -203,7 +131,7 @@ public class ColabAgentClient : MonoBehaviour
                 {
                     Debug.LogError($"Error parsing server response: {ex.Message}");
                     onError?.Invoke($"Error parsing response: {ex.Message}");
-                }
+                } */
             }
             else
             {
@@ -212,6 +140,52 @@ public class ColabAgentClient : MonoBehaviour
                 onError?.Invoke(errorMsg);
             }
         }
+    }
+
+    /// <summary>
+    /// Envía el pitch del emprendedor al servidor de Colab.
+    /// </summary>
+    /// <param name="businessData">Diccionario con las respuestas del cuestionario</param>
+    /// <param name="onSuccess">Callback cuando se recibe respuesta exitosa del juez - retorna el JSON de conversación</param>
+    /// <param name="onError">Callback si hay un error</param>
+    public void SendEntrepreneurPitch(Dictionary<string, string> businessData, System.Action<string> onSuccess, System.Action<string> onError)
+    {
+        // Construir el pitch del emprendedor usando los datos del cuestionario
+        /* string pitch = BuildPitchFromData(businessData, onSuccess, onError);
+        StartCoroutine(SendMessageAndGetHistoryCoroutine(pitch, "Entrepreneur", onSuccess, onError)); */
+        Debug.Log("Starting SendEntrepreneurPitch");
+        StartCoroutine(SendMessageAndGetHistoryCoroutine(businessData, onSuccess, onError));
+    }
+
+    private string GetValue(Dictionary<string, string> dict, string key)
+    {
+        return dict.ContainsKey(key) ? dict[key] : $"[{key} not provided]";
+    }
+
+    /// <summary>
+    /// Envía un mensaje al servidor y luego obtiene el historial completo de conversación.
+    /// </summary>
+    private IEnumerator SendMessageAndGetHistoryCoroutine(Dictionary<string, string> businessData, System.Action<string> onSuccess, System.Action<string> onError)
+    {
+        bool messageSent = false;
+        string sendError = null;
+
+        yield return SendMessageCoroutine2(businessData, 
+            (response) => { messageSent = true; },
+            (error) => { sendError = error; });
+
+        if (!messageSent || sendError != null)
+        {
+            onError?.Invoke(sendError ?? "Failed to send message");
+            yield break;
+        }
+
+        // Esperar un poco para que el servidor procese
+        // yield return new WaitForSeconds(10f);
+
+        // Luego obtener el historial completo
+        Debug.Log("starting GetAndFormatConversationHistoryCoroutine");
+        yield return GetAndFormatConversationHistoryCoroutine(onSuccess, onError);
     }
 
     /// <summary>
@@ -231,6 +205,7 @@ public class ColabAgentClient : MonoBehaviour
         string historyJson = null;
         string historyError = null;
 
+        Debug.Log("starting GetConversationHistoryCoroutine");
         yield return GetConversationHistoryCoroutine(
             (json) => 
             {
@@ -304,6 +279,7 @@ public class ColabAgentClient : MonoBehaviour
 
         string url = serverUrl.TrimEnd('/') + "/conversation_history";
         
+        Debug.Log($"sending request to {url}");
         using (UnityWebRequest request = UnityWebRequest.Get(url))
         {
             yield return request.SendWebRequest();
