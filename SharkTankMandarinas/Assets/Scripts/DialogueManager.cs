@@ -59,6 +59,12 @@ public class DialogueManager : MonoBehaviour
     [SerializeField, Tooltip("If true, clicking Next while typing will instantly show full text instead of skipping to next line")]
     private bool allowSkipTypewriter = true;
     
+    [Header("Animalese Speech")]
+    [SerializeField, Tooltip("Enable Animal Crossing-style speech sounds")]
+    private bool enableAnimalese = true;
+    [SerializeField, Tooltip("The Animalese component for speech synthesis")]
+    private Animalese animalese;
+    
     // Typewriter state
     private Coroutine typewriterCoroutine = null;
     private bool isTyping = false;
@@ -254,6 +260,13 @@ public class DialogueManager : MonoBehaviour
     private void OnSubmitAnswer()
     {
         if (string.IsNullOrWhiteSpace(answerInput.text)) return;
+        
+        // Check bounds before accessing array
+        if (questionIndex >= questionKeys.Length)
+        {
+            Debug.LogWarning("OnSubmitAnswer called but questionIndex is out of bounds. Already finished?");
+            return;
+        }
 
         QnAData data = new QnAData { question = questionKeys[questionIndex], answer = answerInput.text };
         collectedAnswers.Add(data);
@@ -435,7 +448,7 @@ public class DialogueManager : MonoBehaviour
         // Start typewriter effect or show instantly
         if (enableTypewriterEffect)
         {
-            typewriterCoroutine = StartCoroutine(TypewriterEffect(currentFullText));
+            typewriterCoroutine = StartCoroutine(TypewriterEffect(currentFullText, currentLine.characterId));
         }
         else
         {
@@ -594,6 +607,26 @@ public class DialogueManager : MonoBehaviour
     }
 
     /// <summary>
+    /// Gets the voice pitch for a specific character.
+    /// Returns 1.0 (normal) if character not found.
+    /// </summary>
+    private float GetCharacterVoicePitch(string characterId)
+    {
+        if (string.IsNullOrEmpty(characterId) || characterModels == null)
+            return 1.0f;
+        
+        foreach (var profile in characterModels)
+        {
+            if (profile != null && profile.characterId == characterId)
+            {
+                return profile.voicePitch;
+            }
+        }
+        
+        return 1.0f; // Default pitch
+    }
+
+    /// <summary>
     /// Converts markdown-style formatting to TextMeshPro rich text tags.
     /// Supports: **bold**, *italic*, ***bold italic***, __underline__, ~~strikethrough~~
     /// </summary>
@@ -626,13 +659,28 @@ public class DialogueManager : MonoBehaviour
     /// <summary>
     /// Coroutine that reveals text character by character with typewriter effect.
     /// Properly handles rich text tags by not splitting them across frames.
+    /// Plays Animalese speech sounds if enabled.
     /// </summary>
-    private IEnumerator TypewriterEffect(string fullText)
+    private IEnumerator TypewriterEffect(string fullText, string speakingCharacterId = null)
     {
         isTyping = true;
         dialogueText.text = "";
         
         int i = 0;
+        
+        // Start animalese audio playback for the entire text
+        if (enableAnimalese && animalese != null)
+        {
+            // Strip rich text tags for animalese generation
+            string plainText = System.Text.RegularExpressions.Regex.Replace(fullText, "<.*?>", "");
+            
+            // Get character-specific pitch if available
+            float voicePitch = GetCharacterVoicePitch(speakingCharacterId);
+            
+            // Speak the whole text with character's pitch
+            animalese.SpeakWithTypewriterSync(plainText, typewriterSpeed, voicePitch);
+        }
+        
         while (i < fullText.Length)
         {
             // Check if we're at the start of a rich text tag
@@ -656,6 +704,12 @@ public class DialogueManager : MonoBehaviour
             yield return new WaitForSeconds(typewriterSpeed);
         }
         
+        // Stop any remaining audio
+        if (enableAnimalese && animalese != null)
+        {
+            animalese.StopSpeaking();
+        }
+        
         isTyping = false;
         typewriterCoroutine = null;
     }
@@ -669,6 +723,12 @@ public class DialogueManager : MonoBehaviour
         {
             StopCoroutine(typewriterCoroutine);
             typewriterCoroutine = null;
+        }
+        
+        // Stop animalese sounds if playing
+        if (animalese != null)
+        {
+            animalese.StopSpeaking();
         }
         
         dialogueText.text = currentFullText;
@@ -888,6 +948,9 @@ public class CharacterModel {
     public string characterId; 
     [Tooltip("Display name shown in dialogue UI. If empty, characterId is used.")]
     public string displayName;
+    [Tooltip("Voice pitch for Animalese speech (0.5 = deep, 1.0 = normal, 2.0 = high)")]
+    [Range(0.5f, 2.0f)]
+    public float voicePitch = 1.0f;
     public GameObject prefab; 
     public GameObject activePrefab; 
     public GameObject idlePrefab; 

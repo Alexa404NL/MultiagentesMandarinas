@@ -258,6 +258,7 @@ GameObject:
   - component: {fileID: 46688587}
   - component: {fileID: 46688586}
   - component: {fileID: 46688589}
+  - component: {fileID: 46688590}
   m_Layer: 0
   m_Name: EventSystem
   m_TagString: Untagged
@@ -354,16 +355,19 @@ MonoBehaviour:
   characterModels:
   - characterId: Judge1
     displayName: Blanche Steele
+    voicePitch: 0.66
     prefab: {fileID: 499201111}
     activePrefab: {fileID: 499201111}
     idlePrefab: {fileID: 1554952135}
   - characterId: Judge2
     displayName: Dr. Nova Thorne
+    voicePitch: 1.75
     prefab: {fileID: 783572191}
     activePrefab: {fileID: 783572191}
     idlePrefab: {fileID: 1947255910}
   - characterId: Judge3
     displayName: Barnaby Spotts
+    voicePitch: 0.85
     prefab: {fileID: 86634766}
     activePrefab: {fileID: 86634766}
     idlePrefab: {fileID: 1847855613}
@@ -375,6 +379,27 @@ MonoBehaviour:
   enableTypewriterEffect: 1
   typewriterSpeed: 0.01
   allowSkipTypewriter: 1
+  enableAnimalese: 1
+  animalese: {fileID: 46688590}
+--- !u!114 &46688590
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 46688585}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c243a752b56149a4db83663747c73c1a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Animalese
+  letterLibrary: {fileID: 8300000, guid: f8d28f480fafb0f4289f7768f283b7b9, type: 3}
+  pitch: 1
+  shortenWords: 1
+  letterDuration: 0.15
+  volume: 0.5
+  durationMultiplier: 1.69
+  audioSource: {fileID: 0}
 --- !u!1001 &86634765
 PrefabInstance:
   m_ObjectHideFlags: 0
