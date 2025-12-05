@@ -352,15 +352,18 @@ MonoBehaviour:
   nextButton: {fileID: 1751414939}
   dialogueJson: {fileID: 4900000, guid: 7682f2a216ddf2148949e50aeb69c361, type: 3}
   characterModels:
-  - characterId: Judge
+  - characterId: Judge1
+    displayName: Blanche Steele
     prefab: {fileID: 499201111}
     activePrefab: {fileID: 499201111}
     idlePrefab: {fileID: 1554952135}
-  - characterId: Judge1
+  - characterId: Judge2
+    displayName: Dr. Nova Thorne
     prefab: {fileID: 783572191}
     activePrefab: {fileID: 783572191}
     idlePrefab: {fileID: 1947255910}
-  - characterId: Judge2
+  - characterId: Judge3
+    displayName: Barnaby Spotts
     prefab: {fileID: 86634766}
     activePrefab: {fileID: 86634766}
     idlePrefab: {fileID: 1847855613}
@@ -369,6 +372,9 @@ MonoBehaviour:
   preserveParagraphs: 1
   dialogueBoxRect: {fileID: 0}
   splitIndicator: "\u2014"
+  enableTypewriterEffect: 1
+  typewriterSpeed: 0.01
+  allowSkipTypewriter: 1
 --- !u!1001 &86634765
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -431,7 +437,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 9052653839245453732, guid: e53f818505eb2c143b8573dbf5b6636b, type: 3}
       propertyPath: m_Name
-      value: fsh-brn
+      value: Barnaby Spotts
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -2160,7 +2166,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3346722004552561179, guid: cff44fbb9d10a164fb4bfc8fa6fd1909, type: 3}
       propertyPath: m_Name
-      value: fsh
+      value: Blanche Steele
       objectReference: {fileID: 0}
     - target: {fileID: 3346722004552561179, guid: cff44fbb9d10a164fb4bfc8fa6fd1909, type: 3}
       propertyPath: m_IsActive
@@ -2999,7 +3005,7 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 4663350181208256593, guid: 27db3e636256b1d40b1e7ae136072f4e, type: 3}
       propertyPath: m_Name
-      value: narwhal
+      value: Dr. Nova Thorne
       objectReference: {fileID: 0}
     - target: {fileID: 4663350181208256593, guid: 27db3e636256b1d40b1e7ae136072f4e, type: 3}
       propertyPath: m_IsActive

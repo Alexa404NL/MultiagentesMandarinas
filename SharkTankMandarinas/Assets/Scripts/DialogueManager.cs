@@ -1,6 +1,7 @@
 using UnityEngine;
 using TMPro;
 using UnityEngine.UI;
+using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 
@@ -50,6 +51,19 @@ public class DialogueManager : MonoBehaviour
         [SerializeField, Tooltip("A small trailing string appended to pages when a paragraph is split across multiple pages (E.g. ' -'). Leave blank to disable.")]
         private string splitIndicator = " -";
 
+    [Header("Typewriter Effect")]
+    [SerializeField, Tooltip("Enable typewriter effect to reveal text character by character")]
+    private bool enableTypewriterEffect = true;
+    [SerializeField, Tooltip("Time in seconds between each character")]
+    private float typewriterSpeed = 0.03f;
+    [SerializeField, Tooltip("If true, clicking Next while typing will instantly show full text instead of skipping to next line")]
+    private bool allowSkipTypewriter = true;
+    
+    // Typewriter state
+    private Coroutine typewriterCoroutine = null;
+    private bool isTyping = false;
+    private string currentFullText = "";
+
   
     private string[] questions = new string[] { 
         "Business Name:", 
@@ -88,6 +102,10 @@ public class DialogueManager : MonoBehaviour
 
         submitButton.onClick.AddListener(OnSubmitAnswer);
         nextButton.onClick.AddListener(OnNextDialogueLine);
+        
+        // Listen for input field changes to enable/disable submit button
+        answerInput.onValueChanged.AddListener(OnAnswerInputChanged);
+        
         // Auto-assign dialogueBoxRect if missing by searching for a parent RectTransform named "Dialogue Box" (case-insensitive)
         if (dialogueBoxRect == null && dialogueText != null)
         {
@@ -206,11 +224,31 @@ public class DialogueManager : MonoBehaviour
             questionText.text = questions[questionIndex];
             answerInput.text = "";
             answerInput.ActivateInputField();
+            
+            // Disable submit button until user types something
+            UpdateSubmitButtonState();
         }
         else
         {
             FinishInterview();
         }
+    }
+
+    /// <summary>
+    /// Called when the answer input field text changes.
+    /// </summary>
+    private void OnAnswerInputChanged(string text)
+    {
+        UpdateSubmitButtonState();
+    }
+
+    /// <summary>
+    /// Enables or disables the submit button based on whether the input has text.
+    /// </summary>
+    private void UpdateSubmitButtonState()
+    {
+        bool hasText = !string.IsNullOrWhiteSpace(answerInput.text);
+        submitButton.interactable = hasText;
     }
 
     private void OnSubmitAnswer()
@@ -340,6 +378,21 @@ public class DialogueManager : MonoBehaviour
 
     private void OnNextDialogueLine()
     {
+        // If currently typing and skip is allowed, show full text and return
+        if (isTyping && allowSkipTypewriter)
+        {
+            SkipTypewriter();
+            return;
+        }
+        
+        // Stop any ongoing typewriter coroutine
+        if (typewriterCoroutine != null)
+        {
+            StopCoroutine(typewriterCoroutine);
+            typewriterCoroutine = null;
+            isTyping = false;
+        }
+
         if (dialogueQueue.Count == 0)
         {
             Debug.Log("Conversation ended.");
@@ -371,11 +424,24 @@ public class DialogueManager : MonoBehaviour
                 if (idlePrev != null) idlePrev.SetActive(true);
             }
         }
-
-        characterName.text = currentLine.characterId;
-        dialogueText.text = currentLine.content;
-
         GameObject modelRef = GetModelPrefabById(currentLine.characterId);
+
+        // Set character name - prefer display name from CharacterModel, fallback to characterId
+        characterName.text = GetCharacterDisplayName(currentLine.characterId);
+        
+        // Convert markdown formatting to TMP rich text
+        currentFullText = ConvertMarkdownToRichText(currentLine.content);
+        
+        // Start typewriter effect or show instantly
+        if (enableTypewriterEffect)
+        {
+            typewriterCoroutine = StartCoroutine(TypewriterEffect(currentFullText));
+        }
+        else
+        {
+            dialogueText.text = currentFullText;
+        }
+
         // Only switch models if the character ID changed, otherwise leave current model in place
         if (currentCharacterId == currentLine.characterId)
         {
@@ -502,6 +568,111 @@ public class DialogueManager : MonoBehaviour
         // found none
         characterModelCache[id] = null;
         return null;
+    }
+
+    private string GetCharacterDisplayName(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return "Unknown";
+        
+        // Look for a CharacterModel with this id and use its displayName if set
+        if (characterModels != null)
+        {
+            foreach (var profile in characterModels)
+            {
+                if (profile != null && profile.characterId == id)
+                {
+                    // Use displayName if set, otherwise fall back to characterId
+                    if (!string.IsNullOrEmpty(profile.displayName))
+                        return profile.displayName;
+                    break;
+                }
+            }
+        }
+        
+        // Fallback: use the characterId directly (e.g., "Judge1", "Entrepreneur")
+        return id;
+    }
+
+    /// <summary>
+    /// Converts markdown-style formatting to TextMeshPro rich text tags.
+    /// Supports: **bold**, *italic*, ***bold italic***, __underline__, ~~strikethrough~~
+    /// </summary>
+    private string ConvertMarkdownToRichText(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+
+        // Order matters: process longer patterns first to avoid partial matches
+        
+        // ***bold italic*** or ___bold italic___
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\*\*\*(.+?)\*\*\*", "<b><i>$1</i></b>");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"___(.+?)___", "<b><i>$1</i></b>");
+        
+        // **bold** or __bold__ (note: we use __ for underline below, so ** is bold)
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\*\*(.+?)\*\*", "<b>$1</b>");
+        
+        // *italic* or _italic_
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\*(.+?)\*", "<i>$1</i>");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"(?<![_])_([^_]+?)_(?![_])", "<i>$1</i>");
+        
+        // __underline__
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"__(.+?)__", "<u>$1</u>");
+        
+        // ~~strikethrough~~
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"~~(.+?)~~", "<s>$1</s>");
+
+        return text;
+    }
+
+    /// <summary>
+    /// Coroutine that reveals text character by character with typewriter effect.
+    /// Properly handles rich text tags by not splitting them across frames.
+    /// </summary>
+    private IEnumerator TypewriterEffect(string fullText)
+    {
+        isTyping = true;
+        dialogueText.text = "";
+        
+        int i = 0;
+        while (i < fullText.Length)
+        {
+            // Check if we're at the start of a rich text tag
+            if (fullText[i] == '<')
+            {
+                // Find the closing '>' and include the entire tag at once
+                int closingIndex = fullText.IndexOf('>', i);
+                if (closingIndex != -1)
+                {
+                    // Add the entire tag instantly
+                    dialogueText.text += fullText.Substring(i, closingIndex - i + 1);
+                    i = closingIndex + 1;
+                    continue;
+                }
+            }
+            
+            // Add single character
+            dialogueText.text += fullText[i];
+            i++;
+            
+            yield return new WaitForSeconds(typewriterSpeed);
+        }
+        
+        isTyping = false;
+        typewriterCoroutine = null;
+    }
+
+    /// <summary>
+    /// Skips the typewriter effect and shows the full text immediately.
+    /// </summary>
+    private void SkipTypewriter()
+    {
+        if (typewriterCoroutine != null)
+        {
+            StopCoroutine(typewriterCoroutine);
+            typewriterCoroutine = null;
+        }
+        
+        dialogueText.text = currentFullText;
+        isTyping = false;
     }
 
     private void SetAnimatorYapping(GameObject go, bool value)
@@ -713,7 +884,14 @@ public class DialogueManager : MonoBehaviour
 public class QnAData { public string question; public string answer; }
 
 [System.Serializable] // Character prefab and id
-public class CharacterModel { public string characterId; public GameObject prefab; public GameObject activePrefab; public GameObject idlePrefab; }
+public class CharacterModel { 
+    public string characterId; 
+    [Tooltip("Display name shown in dialogue UI. If empty, characterId is used.")]
+    public string displayName;
+    public GameObject prefab; 
+    public GameObject activePrefab; 
+    public GameObject idlePrefab; 
+}
 
 [System.Serializable] // Line of dialogue and character speaking
 public partial class DialogueLine { public string characterId; public string content; }
